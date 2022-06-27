@@ -2,6 +2,101 @@
 #include <array>
 #include <vector>
 #include <fstream>
+#include <unordered_map>
+#include <string>
+
+#include <boost/serialization/unordered_map.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+
+#include <signal.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+const int kNumOfTexts = 2000;
+const char* fname = "serialization.txt";
+// const char* fname = "/mnt/cryptoLab/serialization.txt";
+
+std::string timeNow()
+{
+    const boost::posix_time::ptime now = 
+        boost::posix_time::microsec_clock::local_time();
+
+    const boost::posix_time::time_duration td = now.time_of_day();
+
+    const long hours        = td.hours();
+    const long minutes      = td.minutes();
+    const long seconds      = td.seconds();
+    const long milliseconds = td.total_milliseconds() -
+                              ((hours * 3600 + minutes * 60 + seconds) * 1000);
+    char buf[40];
+    sprintf(buf, "%02ld:%02ld:%02ld.%03ld", 
+        hours, minutes, seconds, milliseconds);
+
+    return buf;
+}
+
+using DpList = std::unordered_map<uint16_t, int>;
+using DpTable = std::unordered_map<uint16_t, DpList>;
+DpTable precalc;
+
+void findStats() {
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+	int min = 0xffff;
+	int max = 0;
+	int sum = 0;
+	int count = 0;
+	double avg = 0;
+	for (const auto& [a, aList]:precalc) {
+		for (const auto& [b, freq]: aList) {
+			if (freq > max) max = freq;
+			if (freq < min) min = freq;
+			sum += freq;
+		}
+		count += aList.size();
+	}
+	avg = (double)sum/count;
+	std::cout << "min " << min << ", max " << max
+		<< ", avg " << avg << '\n';
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+}
+
+void readFromFile() {
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+	std::cout << "Reading...\n";
+	std::ifstream ifs(fname);
+	boost::archive::text_iarchive ia(ifs);
+	ia >> precalc;
+	std::cout << "Reading complete\n";
+	// findStats();
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+}
+
+void saveToFile() {
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+	std::cout << "Saving...\n";
+	std::ofstream ofs{fname};
+	boost::archive::text_oarchive oa(ofs);
+	oa << precalc;
+	std::cout << "Saving complete\n";
+	findStats();
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+}
+
+void addSignalHandler() {
+	struct sigaction sigIntHandler;
+
+	sigIntHandler.sa_handler = [](int s) {
+		saveToFile();
+		exit(1);
+	};
+	sigemptyset(&sigIntHandler.sa_mask);
+	sigIntHandler.sa_flags = 0;
+
+	sigaction(SIGINT, &sigIntHandler, NULL);
+}
 
 void outputBytes(const auto& vec) {
 	auto toAscii = [](uint8_t c) -> char {
@@ -13,48 +108,22 @@ void outputBytes(const auto& vec) {
 	std::cout << '\n';
 }
 
-// arr has most significan bytes on lowest index
-uint16_t arrToUint16 (const auto& vec) {
-	return vec[0]<<8 | vec[1]&&0xff;
-}
-
-std::array<uint8_t, 2> uint16ToArr (uint16_t val) {
-	return {val>>8, val&&0xff};
-}
-
-void precalculation() {
-	std::array<uint8_t, 2> k{0x10, 0x11};
-	for (uint16_t a=0; a<=65535; ++a) {
-		for (uint16_t b=0; b<=65535; ++b) {
-			for (uint16_t x=0; x<=65535; ++x){
-				auto tmp1 = heys_round(uint16ToArr(x), k);
-				uint8_t tmp1u = (tmp1[0] << 8) + tmp1[1] & 0xff;
-				if( 
-					== heys_round());
-			}
-		}
-	}
-}
-
-std::array<uint8_t, 2> heys_round(const std::array<uint8_t, 2>& x, const std::array<uint8_t, 2>& k) {
+uint16_t heys_round(const uint16_t x, const uint16_t k) {
 	static uint8_t s[16] =  {4, 0xB, 1, 0xF, 9, 2, 0xE, 0xC, 6, 0xA, 8, 7, 3, 5, 0, 0xD};
 
-	uint8_t y[2] = {
-		x[0] ^ k[0],
-		x[1] ^ k[1],
-	};
+	uint16_t y = x^k;
 
 	uint8_t z[4] = {
-		s[y[0]&0xf],
-		s[y[0]>>4],
-		s[y[1]&0xf],
-		s[y[1]>>4],
+		s[y      &0xf],
+		s[(y>>4) &0xf],
+		s[(y>>8) &0xf],
+		s[(y>>12)],
 	};
 
-	std::array<uint8_t, 2> res{0};
+	uint16_t res = 0;
 	for(int j = 0; j < 4; ++j) {
 		for (int i = 0; i < 4; ++i) {
-			res[i/2] |= ((z[j] >> i) & 0x1) << (i%2==0 ? j : j+4);
+			res |= ((z[j] >> i) & 0x1) << (j + i*4);
 		}
 	}
 
@@ -71,52 +140,111 @@ std::vector<uint8_t> heys(const std::vector<uint8_t>& x, const std::array<uint8_
 	std::vector<uint8_t> res(size_oddified, 0);
 
 	for (int i = 0; i < size_oddified; i += 2) {
-		std::array<uint8_t, 2> tmp{x[i], x[i+1]};
+		uint16_t tmp = (x[i]&0xff) | (x[i+1]<<8);
 		for (int j = 0; j < 6; ++j) {
-			// std::cout << "r" << j+1 << ": ";
 			// outputBytes(heys_round(tmp, {k[j*2], k[j*2+1]}));
-			tmp = heys_round(tmp, {k[j*2], k[j*2+1]});
+			uint16_t roundKey = (k[j*2]&0xff) | (k[j*2+1]<<8);
+			tmp = heys_round(tmp, roundKey);
 		}
-		res[i] = tmp[0] ^ k[12];
-		res[i+1] = tmp[1] ^ k[13];
+		res[i] = tmp ^ k[12];
+		res[i+1] = (tmp>>8) ^ k[13];
 	}
 
 	return res;
 }
 
-// a is fixed
-using DpList = std::vector<std::pair<uint16_t, double>>;
-// a is not fixed
-// no need to use std::pair, since vector's index will be a, cuz we iterate
-//  through all possible a
-using DpTable = std::vector<DpList>;
-
-std::vector<std::pair<uint16_t, double>> branchAndBound(
-	uint16_t a, roundDpTable) {
+uint16_t invL(uint16_t val) {
 
 }
 
-// precalc: only non-trivial differentials!
+uint16_t invS(uint16_t val) {
 
-int main() {
-	std::ifstream filePt{"pt.txt", std::ios::binary | std::ios::ate};
-	int filePtSize = filePt.tellg();
-	std::vector<uint8_t> pt(filePtSize, 0);
-	filePt.seekg(0, filePt.beg);
-	filePt.read((char*)pt.data(), filePtSize);
+}
 
-	std::ifstream fileKey{"k.txt", std::ios::binary | std::ios::ate};
-	int fileKeySize = fileKey.tellg();
-	if (fileKeySize > 14) {
-		std::cout << "Key should be 14 byte long(if shorter, then padded with 0s)";
-		exit(1);
+// todo: precalc: only non-trivial differentials! is only (0,0) trivial?
+void performPrecalculation(const uint16_t k) {
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+	addSignalHandler();
+	// 65534
+	const double incr = 1/kNumOfTexts;
+	for (uint16_t x1{0}; x1<=kNumOfTexts; ++x1) {
+		for (uint16_t a{0}; a<=65534; ++a) {
+			uint16_t x2 = x1 + a;
+			uint16_t tmp1 = heys_round(x1, k);
+			uint16_t tmp2 = heys_round(x2, k);
+			uint16_t b = tmp2 - tmp1;
+
+			if (a==0 && b == 0) continue;
+
+			if(auto it = precalc.find(a); it !=precalc.end()) {
+				auto& listPerA = it->second;
+				if (auto it2 = listPerA.find(b); it2 != listPerA.end()) {
+					auto& freq = it2->second;
+					freq += 1;
+					// freq += incr;
+				} else {
+					listPerA.emplace(b, 1);
+				}
+			} else {
+				precalc.emplace(a, DpList{{b, 1}});
+			}
+		}
+		
+		if (x1%1000 == 0) std::cout <<  '\n' << x1 << '\n';
 	}
-	std::array<uint8_t, 14> k{0};
-	fileKey.seekg(0, fileKey.beg);
-	fileKey.read((char*)k.data(), fileKeySize);
 
-	auto res = heys(pt, k);
-	// outputBytes(pt);
-	outputBytes(res);
+	// won't reach here if too many iterations
+	saveToFile();
+}
 
+
+DpList branchAndBound(uint16_t a) {
+	DpList gPrev{{a, 1.0}};
+	for (int t=1; t<=5; ++t) {
+		DpList gCurr;
+		for (const auto& prevState: gPrev) {
+			for (const auto& nextState: precalc[prevState.first]) {
+				// auto& gama = precalc.first;
+
+				if (auto it = gCurr.find(nextState.first); it!=gCurr.end()) {
+					it->second += 
+				}
+			}
+		}
+	}
+}
+
+
+
+
+int main(int argc, char* argv[]) {
+	
+
+	// std::ifstream filePt{argv[1], std::ios::binary | std::ios::ate};
+	// int filePtSize = filePt.tellg();
+	// std::vector<uint8_t> pt(filePtSize, 0);
+	// filePt.seekg(0, filePt.beg);
+	// filePt.read((char*)pt.data(), filePtSize);
+
+	// std::ifstream fileKey{argv[3], std::ios::binary | std::ios::ate};
+	// int fileKeySize = fileKey.tellg();
+	// if (fileKeySize > 14) {
+	// 	std::cout << "Key should be 14 byte long(if shorter, then padded with 0s)";
+	// 	exit(1);
+	// }
+	// std::array<uint8_t, 14> k{0};
+	// fileKey.seekg(0, fileKey.beg);
+	// fileKey.read((char*)k.data(), fileKeySize);
+
+	// auto res = heys(pt, k);
+	// // outputBytes(pt);
+	// outputBytes(res);
+
+	// std::ofstream fileCt{argv[2], std::ios::binary};
+	// fileCt.write((char*)res.data(), res.size());
+	
+	// performPrecalculation(1234U);
+
+	readFromFile();
+	// findStats();
 }
