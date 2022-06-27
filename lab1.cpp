@@ -15,8 +15,12 @@
 #include <stdio.h>
 #include <unistd.h>
 
+const int kNumOfMaxs = 10;
+
 const int kNumOfTexts = 2000;
 const char* fname = "serialization.txt";
+const double kQStar = 0.001;
+const std::array<double, 5> pStars = {0.2, 0.01, 0.01, 0.0001, 0.00001};
 // const char* fname = "/mnt/cryptoLab/serialization.txt";
 
 std::string timeNow()
@@ -38,65 +42,107 @@ std::string timeNow()
     return buf;
 }
 
-using DpList = std::unordered_map<uint16_t, int>;
+using DpList = std::unordered_map<uint16_t, double>;
 using DpTable = std::unordered_map<uint16_t, DpList>;
 DpTable precalc;
 
 void findStats() {
 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-	int min = 0xffff;
-	int max = 0;
-	int sum = 0;
+	double min = 1.0;
+	// double max = 0;
+	// uint16_t maxA, maxB;
+	std::map<double, std::pair<uint16_t, uint16_t>> max{};
+	double sum = 0;
 	int count = 0;
-	double avg = 0;
 	for (const auto& [a, aList]:precalc) {
-		for (const auto& [b, freq]: aList) {
-			if (freq > max) max = freq;
-			if (freq < min) min = freq;
-			sum += freq;
+		for (const auto [b, prob]: aList) {
+			// if (prob > max) { max = prob; maxA=a; maxB=b; }
+			if(max.size()>0 && prob > max.begin()->first) {
+				if (max.size() >= kNumOfMaxs) {
+					// *max.begin() = prob;
+					max.erase(max.begin());
+				} 
+				max.emplace(prob, std::make_pair(a, b));
+			} else if (max.size() == 0) {
+				max.emplace(prob, std::make_pair(a, b));
+			}
+			if (prob < min) min = prob;
+			sum += prob;
 		}
 		count += aList.size();
 	}
-	avg = (double)sum/count;
-	std::cout << "min " << min << ", max " << max
+	double avg = (double)sum/count;
+	std::string maxs = "[";
+	for (const auto [p, dif]:max) {maxs += "(" + std::to_string(dif.first) + "," + std::to_string(dif.second) + ")=" + std::to_string(p) + ", ";}
+	maxs += "]";
+	std::cout << "min " << min << ", max " << maxs
 		<< ", avg " << avg << '\n';
 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 }
 
-void readFromFile() {
+void findStatsList(uint16_t a, const DpList& l) {
 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-	std::cout << "Reading...\n";
-	std::ifstream ifs(fname);
-	boost::archive::text_iarchive ia(ifs);
-	ia >> precalc;
-	std::cout << "Reading complete\n";
-	// findStats();
+	double min = 1.0;
+	// don't need b, need only prob...
+	std::map<double, uint16_t> max{};
+	double sum = 0;
+	for (const auto [b, prob]: l) {
+		if(max.size()>0 && prob > max.begin()->first) {
+			if (max.size() >= kNumOfMaxs) {
+				// *max.begin() = prob;
+				max.erase(max.begin());
+			} 
+			max.emplace(prob, b);
+		} else if (max.size() == 0) {
+			max.emplace(prob, b);
+		}
+		if (prob < min) min = prob;
+		sum += prob;
+	}
+	double avg = (double)sum/l.size();
+	std::string maxs = "[";
+	for (const auto [p, b]:max) {maxs += "(" + std::to_string(a) + "," + std::to_string(b) + ")=" + std::to_string(p) + ", ";}
+	maxs += "]";
+	std::cout << "min " << min << ", max " << maxs
+		<< ", avg " << avg << '\n';
 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 }
 
-void saveToFile() {
-	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-	std::cout << "Saving...\n";
-	std::ofstream ofs{fname};
-	boost::archive::text_oarchive oa(ofs);
-	oa << precalc;
-	std::cout << "Saving complete\n";
-	findStats();
-	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-}
+// void readFromFile() {
+// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+// 	std::cout << "Reading...\n";
+// 	std::ifstream ifs(fname);
+// 	boost::archive::text_iarchive ia(ifs);
+// 	ia >> precalc;
+// 	std::cout << "Reading complete\n";
+// 	// findStats();
+// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+// }
 
-void addSignalHandler() {
-	struct sigaction sigIntHandler;
+// void saveToFile() {
+// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+// 	// todo: mb here remove low prob elements < q*
+// 	std::cout << "Saving...\n";
+// 	std::ofstream ofs{fname};
+// 	boost::archive::text_oarchive oa(ofs);
+// 	oa << precalc;
+// 	std::cout << "Saving complete\n";
+// 	findStats();
+// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+// }
 
-	sigIntHandler.sa_handler = [](int s) {
-		saveToFile();
-		exit(1);
-	};
-	sigemptyset(&sigIntHandler.sa_mask);
-	sigIntHandler.sa_flags = 0;
+// void addSignalHandler() {
+// 	struct sigaction sigIntHandler;
 
-	sigaction(SIGINT, &sigIntHandler, NULL);
-}
+// 	sigIntHandler.sa_handler = [](int s) {
+// 		saveToFile();
+// 		exit(1);
+// 	};
+// 	sigemptyset(&sigIntHandler.sa_mask);
+// 	sigIntHandler.sa_flags = 0;
+
+// 	sigaction(SIGINT, &sigIntHandler, NULL);
+// }
 
 void outputBytes(const auto& vec) {
 	auto toAscii = [](uint8_t c) -> char {
@@ -164,10 +210,10 @@ uint16_t invS(uint16_t val) {
 // todo: precalc: only non-trivial differentials! is only (0,0) trivial?
 void performPrecalculation(const uint16_t k) {
 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-	addSignalHandler();
+	// addSignalHandler();
 	// 65534
-	const double incr = 1/kNumOfTexts;
-	for (uint16_t x1{0}; x1<=kNumOfTexts; ++x1) {
+	const double incr = 1.0/kNumOfTexts;
+	for (uint16_t x1{0}; x1<kNumOfTexts; ++x1) {
 		for (uint16_t a{0}; a<=65534; ++a) {
 			uint16_t x2 = x1 + a;
 			uint16_t tmp1 = heys_round(x1, k);
@@ -179,39 +225,83 @@ void performPrecalculation(const uint16_t k) {
 			if(auto it = precalc.find(a); it !=precalc.end()) {
 				auto& listPerA = it->second;
 				if (auto it2 = listPerA.find(b); it2 != listPerA.end()) {
-					auto& freq = it2->second;
-					freq += 1;
-					// freq += incr;
+					auto& prob = it2->second;
+					// prob += 1;
+					prob += incr;
 				} else {
-					listPerA.emplace(b, 1);
+					listPerA.emplace(b, incr);
 				}
 			} else {
-				precalc.emplace(a, DpList{{b, 1}});
+				precalc.emplace(a, DpList{{b, incr}});
 			}
 		}
 		
-		if (x1%1000 == 0) std::cout <<  '\n' << x1 << '\n';
+		if (x1%1000 == 999) std::cout <<  '\n' << x1 << '\n';
 	}
 
+	findStats();
+
+	int countRemoved = 0;
+	for (auto aListIt = precalc.begin();aListIt!=precalc.end();++aListIt) {
+		auto& listPerA = aListIt->second;
+		for (auto bListIt = listPerA.begin();bListIt!=listPerA.end();) {
+			if (bListIt->second <= kQStar) {
+				++countRemoved;
+				bListIt = listPerA.erase(bListIt);
+			} else {
+				++bListIt;
+			}
+		}
+		// don't need to remove
+		// if (listPerA.size() == 0) {
+		// 	aListIt = precalc.erase(aListIt);
+		// 	break;
+		// } else {
+		// 	++aListIt;
+		// }
+	}
+
+	std::cout << "Removed (prob less then q*) diffs " << countRemoved << '\n';
+
+	findStats();
 	// won't reach here if too many iterations
-	saveToFile();
+	// saveToFile();
 }
 
 
 DpList branchAndBound(uint16_t a) {
-	DpList gPrev{{a, 1.0}};
-	for (int t=1; t<=5; ++t) {
-		DpList gCurr;
-		for (const auto& prevState: gPrev) {
-			for (const auto& nextState: precalc[prevState.first]) {
+	DpList gCurr{{a, 1.0}};
+	DpList gNext;
+	std::cout << "Size of nexts " << precalc[a].size() << '\n';
+	for (int t=1; t<=2; ++t) {
+		gNext.clear();
+		// branch
+		for (const auto& currState: gCurr) {
+			for (const auto& nextState: precalc[currState.first]) {
 				// auto& gama = precalc.first;
 
-				if (auto it = gCurr.find(nextState.first); it!=gCurr.end()) {
-					it->second += 
+				if (auto it = gNext.find(nextState.first); it!=gNext.end()) {
+					it->second += currState.second * nextState.second;
+				} else {
+					gNext.emplace(nextState.first, currState.second * nextState.second);
 				}
 			}
 		}
+
+		findStatsList(a, gNext);
+		std::cout << "gNext size before bound step: " << gNext.size() <<'\n';
+
+		//bound
+		for (auto it=gNext.begin();it!=gNext.end();) {
+			if (it->second <= pStars[t-1]) {
+				it = gNext.erase(it);
+			} else {
+				++it;
+			}
+		}
+		std::cout << "gNext size after bound step: " << gNext.size() <<'\n';
 	}
+	return gNext;
 }
 
 
@@ -243,8 +333,19 @@ int main(int argc, char* argv[]) {
 	// std::ofstream fileCt{argv[2], std::ios::binary};
 	// fileCt.write((char*)res.data(), res.size());
 	
-	// performPrecalculation(1234U);
+	// min 0.00333333, max [(65520,480)=0.106667, (65280,16324)=0.146667, (65280,17480)=0.853333, (64256,33800)=1.000000, ], avg 0.00393765
+	// performPrecalculation(0x04d2);
 
-	readFromFile();
+	// min 0.00333333, max [(65280,17412)=0.146667, (61584,32248)=0.160000, (65280,16372)=0.853333, (61440,32760)=1.000000, ], avg 0.00402086
+	// performPrecalculation(0xffee);
+
+	// 2000
+	//min 0.0005, max [(61568,24616)=0.072000, (65280,64)=0.104000, (65360,65024)=0.112000, (65504,57344)=0.120000, (65534,61440)=0.125000, (65520,32)=0.128000, 
+	// (62208,31752)=0.232000, (64256,33800)=0.256000, (61440,32776)=1.000000, ], avg 0.00068583
+	performPrecalculation(0x0000);
+	// taking As with most probable difs in precalc
+	branchAndBound(61440);
+
+	// readFromFile();
 	// findStats();
 }
