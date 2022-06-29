@@ -7,9 +7,6 @@
 #include <functional>
 #include <set>
 
-#include <boost/serialization/unordered_map.hpp>
-#include <boost/archive/text_oarchive.hpp>
-#include <boost/archive/text_iarchive.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #include <signal.h>
@@ -31,7 +28,6 @@ uint8_t S[16] =  {4, 0xB, 1, 0xF, 9, 2, 0xE, 0xC, 6, 0xA, 8, 7, 3, 5, 0, 0xD};
 const int kNumOfTextsForBrute = 10000;
 // the more, the better
 const int kMaxKeyCandidatesPerDiff = 30;
-// const char* fname = "/mnt/cryptoLab/serialization.txt";
 
 std::string timeNow()
 {
@@ -59,8 +55,6 @@ DpTable precalc;
 auto findStats() {
 	// std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 	double min = 1.0;
-	// double max = 0;
-	// uint16_t maxA, maxB;
 	std::multimap<double, std::pair<uint16_t, uint16_t>> max{};
 	double sum = 0;
 	int count = 0;
@@ -94,7 +88,6 @@ auto findStats() {
 void findStatsList(uint16_t a, const DpList& l, int round) {
 	// std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 	double min = 1.0;
-	// don't need b, need only prob...
 	std::multimap<double, uint16_t> max{};
 	double sum = 0;
 	for (const auto [b, prob]: l) {
@@ -123,42 +116,6 @@ void findStatsList(uint16_t a, const DpList& l, int round) {
 	}
 	// std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 }
-
-// void readFromFile() {
-// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-// 	std::cout << "Reading...\n";
-// 	std::ifstream ifs(fname);
-// 	boost::archive::text_iarchive ia(ifs);
-// 	ia >> precalc;
-// 	std::cout << "Reading complete\n";
-// 	// findStats();
-// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-// }
-
-// void saveToFile() {
-// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-// 	// todo: mb here remove low prob elements < q*
-// 	std::cout << "Saving...\n";
-// 	std::ofstream ofs{fname};
-// 	boost::archive::text_oarchive oa(ofs);
-// 	oa << precalc;
-// 	std::cout << "Saving complete\n";
-// 	findStats();
-// 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
-// }
-
-// void addSignalHandler() {
-// 	struct sigaction sigIntHandler;
-
-// 	sigIntHandler.sa_handler = [](int s) {
-// 		saveToFile();
-// 		exit(1);
-// 	};
-// 	sigemptyset(&sigIntHandler.sa_mask);
-// 	sigIntHandler.sa_flags = 0;
-
-// 	sigaction(SIGINT, &sigIntHandler, NULL);
-// }
 
 void outputBytes(const auto& vec) {
 	auto toAscii = [](uint8_t c) -> char {
@@ -240,10 +197,7 @@ uint16_t invS(uint16_t val) {
 	return res;
 }
 
-// todo: precalc: only non-trivial differentials! is only (0,0) trivial?
 auto performPrecalculation(const uint16_t k) {
-	// addSignalHandler();
-	// 65534
 	std::cout << "Precalculation using key " << std::hex << k << std::dec<< '\n';
 	const double incr = 1.0/kNumOfTexts;
 	for (uint16_t x1{0}; x1<kNumOfTexts; ++x1) {
@@ -258,12 +212,6 @@ auto performPrecalculation(const uint16_t k) {
 
 			if(auto it = precalc.find(a); it !=precalc.end()) {
 				auto& listPerA = it->second;
-				// if (auto it2 = listPerA.find(b); it2 != listPerA.end()) {
-				// 	auto& prob = it2->second;
-				// 	prob += incr;
-				// } else {
-				// 	listPerA.emplace(b, incr);
-				// }
 				listPerA[b] += incr;
 			} else {
 				precalc.emplace(a, DpList{{b, incr}});
@@ -286,20 +234,12 @@ auto performPrecalculation(const uint16_t k) {
 				++bListIt;
 			}
 		}
-		// don't need to remove
-		// if (listPerA.size() == 0) {
-		// 	aListIt = precalc.erase(aListIt);
-		// 	break;
-		// } else {
-		// 	++aListIt;
-		// }
 	}
 
 	std::cout << "Removed (prob less then q*) diffs " << countRemoved << '\n';
 
 	auto max = findStats();
-	// won't reach here if too many iterations
-	// saveToFile();
+
 	std::cout << __FUNCTION__ << ": " << timeNow() << "\n\n";
 	return max;
 }
@@ -308,7 +248,6 @@ auto performPrecalculation(const uint16_t k) {
 DpList branchAndBound(uint16_t a) {
 	DpList gCurr{{a, 1.0}};
 	DpList gNext;
-	// std::cout << "Size of nexts " << precalc[a].size() << '\n';
 	for (int t=1; t<=5; ++t) {
 		gNext.clear();
 		// branch
@@ -318,9 +257,8 @@ DpList branchAndBound(uint16_t a) {
 			}
 		}
 
-		if (t == 5) findStatsList(a, gNext, t);
-
-		// std::cout << t << ": gNext size before bound step: " << gNext.size() <<'\n';
+		findStatsList(a, gNext, t);
+		// if (t == 5) findStatsList(a, gNext, t);
 
 		//bound
 		for (auto it=gNext.begin();it!=gNext.end();) {
@@ -330,7 +268,6 @@ DpList branchAndBound(uint16_t a) {
 				++it;
 			}
 		}
-		// std::cout << t << ": gNext size after bound step: " << gNext.size() <<"\n\n";
 		gCurr = std::move(gNext);
 	}
 	std::cout << __FUNCTION__ << ": " << timeNow() << "\n\n";
@@ -367,7 +304,7 @@ void ptWriteNotMyHeys(int numOfTexts, uint16_t a) {
         pt2[2*i+1] = ((xXORa)>>8)&0xff;
     }
 
-    // they're gonna be heys.bin input PT
+    // they're gonna be heys.bin's input PT
     std::ofstream fileInputPt1{"largePt1.txt", std::ios::binary};
 	fileInputPt1.write((char*)pt1.data(), pt1.size());
 
@@ -381,7 +318,7 @@ auto ctReadNotMyHeys(int numOfTexts) {
     std::vector<uint8_t> ct1(2 * numOfTexts, 0);
     std::vector<uint8_t> ct2(2 * numOfTexts, 0);
     
-    // they're gonna be heys.bin output CT
+    // they're gonna be heys.bin's output CT
     std::ifstream fileOutputCt1{"largeCt1.txt", std::ios::binary};
 	fileOutputCt1.read((char*)ct1.data(), ct1.size());
 
@@ -394,8 +331,6 @@ auto ctReadNotMyHeys(int numOfTexts) {
 
 // 1 text = 2 bytes
 void bruteK7(int numOfTexts, uint16_t a, uint16_t b, const std::vector<uint8_t>& ct1, const std::vector<uint8_t>& ct2) {
-    // auto [pt1, pt2, ct1, ct2] = genPtCt(len, a, numOfTexts);
-    // static const auto [ct1, ct2] = ctGenerator(numOfTexts);
     std::unordered_map<uint16_t, int> perKeySuccessCount;
     for (uint16_t i{0}; i < numOfTexts; ++i) {
         for (int k7Ext{0}; k7Ext < 65536; ++k7Ext) {
@@ -408,7 +343,6 @@ void bruteK7(int numOfTexts, uint16_t a, uint16_t b, const std::vector<uint8_t>&
             uint16_t x52XORk6 = invS(invL(x62));
             uint16_t potentialB = x51XORk6 ^ x52XORk6;
             if (potentialB == b) {
-                // std::cout << "Success on key "<< std::hex << k7 << '\n';
                 perKeySuccessCount[k7] += 1;
             }
         }
@@ -416,7 +350,6 @@ void bruteK7(int numOfTexts, uint16_t a, uint16_t b, const std::vector<uint8_t>&
 
     std::multimap<int, uint16_t> max{};
     for (const auto [k, freq] : perKeySuccessCount) {
-        // if (freq > 1){ std::cout << "found freq " << freq << " for key " << std::hex << k << '\n'; }
         if (max.size() > 0 && freq > max.begin()->first) {
             if (max.size() >= kMaxKeyCandidatesPerDiff) {
                 max.erase(max.begin());
@@ -438,39 +371,9 @@ void bruteK7(int numOfTexts, uint16_t a, uint16_t b, const std::vector<uint8_t>&
 int main(int argc, char* argv[]) {
 	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 
-	// std::ifstream filePt{argv[1], std::ios::binary | std::ios::ate};
-	// int filePtSize = filePt.tellg();
-	// std::vector<uint8_t> pt(filePtSize, 0);
-	// filePt.seekg(0, filePt.beg);
-	// filePt.read((char*)pt.data(), filePtSize);
+	// --------------------------------------- SEARCHING FOR MOST PROBABLE DIFFS --------------------------------------
 
-	// std::ifstream fileKey{"k.txt", std::ios::binary | std::ios::ate};
-	// int fileKeySize = fileKey.tellg();
-	// if (fileKeySize > 14) {
-	// 	std::cout << "Key should be 14 byte long(if shorter, then padded with 0s)";
-	// 	exit(1);
-	// }
-	// std::array<uint8_t, 14> k{0};
-	// fileKey.seekg(0, fileKey.beg);
-	// fileKey.read((char*)k.data(), fileKeySize);
-
-	// auto res = heys(pt, k);
-	// // outputBytes(pt);
-	// outputBytes(res);
-
-	// std::ofstream fileCt{argv[2], std::ios::binary};
-	// fileCt.write((char*)res.data(), res.size());
-	
-	// min 0.00333333, max [(65520,480)=0.106667, (65280,16324)=0.146667, (65280,17480)=0.853333, (64256,33800)=1.000000, ], avg 0.00393765
-	// performPrecalculation(0x04d2);
-
-	// min 0.00333333, max [(65280,17412)=0.146667, (61584,32248)=0.160000, (65280,16372)=0.853333, (61440,32760)=1.000000, ], avg 0.00402086
-	// performPrecalculation(0xffee);
-
-	// 2000
-	//min 0.0005, max [(61568,24616)=0.072000, (65280,64)=0.104000, (65360,65024)=0.112000, (65504,57344)=0.120000, (65534,61440)=0.125000, (65520,32)=0.128000, 
-	// (62208,31752)=0.232000, (64256,33800)=0.256000, (61440,32776)=1.000000, ], avg 0.00068583
-	// auto maxAB = performPrecalculation(0xabcd);
+	// auto maxAB = performPrecalculation(0x0000);
 	// // // taking As with most probable difs in precalc
 	// std::set<uint16_t> aUsed;
 	// for (auto it=maxAB.rbegin();it!=maxAB.rend();++it) {
@@ -480,13 +383,13 @@ int main(int argc, char* argv[]) {
 	// 	aUsed.insert(it->second.first);
 	// }
 
-	// // // // using precalc for key = 0x0000
+	// --------------------------------------- TRYING TO BRUTEFORCE KEY SUPPLIED BY ME --------------------------------------
+
     // auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
     // 	// {40960,1092}, {40960,52428}, {40960,4}, {40960,8736}, {40960,34952}, {40960,17472},
     // 	{53248,34952}, {53248,17472}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,8736}, {53248,16384}, {53248,17476}, {53248,52428},
     // 	// {53248,8736},
     // };
-    // // const auto [ct1, ct2] = 
     // std::vector<uint8_t> ct1, ct2;
     // uint16_t currA = 0;
     // // std::array<uint8_t, 14> testKey{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x11, 0x11};
@@ -497,17 +400,18 @@ int main(int argc, char* argv[]) {
     //         std::tie(ct1, ct2) = ctGenMyHeys(kNumOfTextsForBrute, a, testKey);
     //         currA = a;
     // 	}
-    //     // bruteK7(kNumOfTextsForBrute, b, std::bind(ctGenMyHeys, std::placeholders::_1, a, std::array<uint8_t,
-    //     // 14>{0,0,0,0,0,0,0,0,0,0,0,0,0x11, 0x11}));
     //     bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
     // }
-    
-	// // -------------------------- FAIL
- //    // ptWriteNotMyHeys(kNumOfTextsForBrute, 53248);
 
-	// can use only the same a for all diff
+ //    // --------------------------------------- TRYING TO BRUTEFORCE KEY EMBEDDED IN HEYS.BIN -> FAILS UNFORTENETLY -----------------------------
+    
+    ptWriteNotMyHeys(kNumOfTextsForBrute, 53248);
+    // // ptWriteNotMyHeys(kNumOfTextsForBrute, 20480);
+
+	// can use only the same a for all diff when bruteforcing embedded key
     auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
-    	{53248,34952}, {53248,17472}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,8736}, {53248,16384}, {53248,17476}, {53248,52428},
+    	{53248,8736}, {53248,17476}, {53248,17472}, {53248,34952}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,16384}, {53248,52428},
+    	// {20480,34824}, {20480,32776}, {20480,4369}, {20480,8738}, {20480,4097}, {20480,4353}, {20480,257}, {20480,17}, {20480,514}, {20480,8706}
     };
     std::vector<uint8_t> ct1, ct2;
     uint16_t currA = 0;
@@ -518,42 +422,4 @@ int main(int argc, char* argv[]) {
     	}
         bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
     }
-
-    // ptWriteNotMyHeys(kNumOfTextsForBrute, 20480);
-
-	// // -------------------------- FAIL
-	// // can use only the same a for all diff
- //    auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
- //    	{20480,34824}, {20480,32776}, {20480,4369}, {20480,8738}, {20480,4097}, {20480,4353}, {20480,257}, {20480,17}, {20480,514}, {20480,8706}
- //    };
- //    std::vector<uint8_t> ct1, ct2;
- //    uint16_t currA = 0;
- //    for (const auto [a, b] : mostProbable5RoundDiffs) {
- //    	if (currA != a) {
- //            std::tie(ct1, ct2) = ctReadNotMyHeys(kNumOfTextsForBrute);
- //            currA = a;
- //    	}
- //        bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
- //    }
-
-    // ptWriteNotMyHeys(kNumOfTextsForBrute, 53248);
-
-	// // can use only the same a for all diff
- //    auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
- //    	{53248,16384}
- //    };
- //    std::vector<uint8_t> ct1, ct2;
- //    uint16_t currA = 0;
- //    for (const auto [a, b] : mostProbable5RoundDiffs) {
- //    	if (currA != a) {
- //            std::tie(ct1, ct2) = ctReadNotMyHeys(kNumOfTextsForBrute);
- //            currA = a;
- //    	}
- //        bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
- //    }
-
-
-
-        // readFromFile();
-	// findStats();
 }
