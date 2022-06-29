@@ -4,6 +4,8 @@
 #include <fstream>
 #include <unordered_map>
 #include <string>
+#include <functional>
+#include <set>
 
 #include <boost/serialization/unordered_map.hpp>
 #include <boost/archive/text_oarchive.hpp>
@@ -17,10 +19,18 @@
 
 const int kNumOfMaxs = 10;
 
-const int kNumOfTexts = 2000;
+const int kNumOfTexts = 10000;
 const char* fname = "serialization.txt";
-const double kQStar = 0.001;
-const std::array<double, 5> pStars = {0.2, 0.01, 0.01, 0.0001, 0.00001};
+// don't need it
+const double kQStar = 0.0001;
+// works fast anyway
+const std::array<double, 5> pStars = {0.0001, 0.0001, 0.00001, 0.00001, 0.00001};
+uint8_t S[16] =  {4, 0xB, 1, 0xF, 9, 2, 0xE, 0xC, 6, 0xA, 8, 7, 3, 5, 0, 0xD};
+
+// const int kNumOfTextsForBrute = 10000;
+const int kNumOfTextsForBrute = 10000;
+// the more, the better
+const int kMaxKeyCandidatesPerDiff = 30;
 // const char* fname = "/mnt/cryptoLab/serialization.txt";
 
 std::string timeNow()
@@ -46,12 +56,12 @@ using DpList = std::unordered_map<uint16_t, double>;
 using DpTable = std::unordered_map<uint16_t, DpList>;
 DpTable precalc;
 
-void findStats() {
-	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+auto findStats() {
+	// std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 	double min = 1.0;
 	// double max = 0;
 	// uint16_t maxA, maxB;
-	std::map<double, std::pair<uint16_t, uint16_t>> max{};
+	std::multimap<double, std::pair<uint16_t, uint16_t>> max{};
 	double sum = 0;
 	int count = 0;
 	for (const auto& [a, aList]:precalc) {
@@ -77,14 +87,15 @@ void findStats() {
 	maxs += "]";
 	std::cout << "min " << min << ", max " << maxs
 		<< ", avg " << avg << '\n';
-	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+	// std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+	return max;
 }
 
-void findStatsList(uint16_t a, const DpList& l) {
-	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+void findStatsList(uint16_t a, const DpList& l, int round) {
+	// std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 	double min = 1.0;
 	// don't need b, need only prob...
-	std::map<double, uint16_t> max{};
+	std::multimap<double, uint16_t> max{};
 	double sum = 0;
 	for (const auto [b, prob]: l) {
 		if(max.size()>0 && prob > max.begin()->first) {
@@ -103,9 +114,14 @@ void findStatsList(uint16_t a, const DpList& l) {
 	std::string maxs = "[";
 	for (const auto [p, b]:max) {maxs += "(" + std::to_string(a) + "," + std::to_string(b) + ")=" + std::to_string(p) + ", ";}
 	maxs += "]";
-	std::cout << "min " << min << ", max " << maxs
+	std::cout << "min " << min << ", max " << round << "-round diff:" << maxs
 		<< ", avg " << avg << '\n';
-	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+	if (round == 5) {
+		maxs = "";
+		for (auto it=max.rbegin();it!=max.rend();++it) {maxs += "{" + std::to_string(a) + "," + std::to_string(it->second) + "}, ";}
+		std::cout << "max = " << maxs << '\n';
+	}
+	// std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 }
 
 // void readFromFile() {
@@ -155,15 +171,15 @@ void outputBytes(const auto& vec) {
 }
 
 uint16_t heys_round(const uint16_t x, const uint16_t k) {
-	static uint8_t s[16] =  {4, 0xB, 1, 0xF, 9, 2, 0xE, 0xC, 6, 0xA, 8, 7, 3, 5, 0, 0xD};
+	uint8_t S[16] =  {4, 0xB, 1, 0xF, 9, 2, 0xE, 0xC, 6, 0xA, 8, 7, 3, 5, 0, 0xD};
 
 	uint16_t y = x^k;
 
 	uint8_t z[4] = {
-		s[y      &0xf],
-		s[(y>>4) &0xf],
-		s[(y>>8) &0xf],
-		s[(y>>12)],
+		S[y      &0xf],
+		S[(y>>4) &0xf],
+		S[(y>>8) &0xf],
+		S[(y>>12)],
 	};
 
 	uint16_t res = 0;
@@ -200,37 +216,55 @@ std::vector<uint8_t> heys(const std::vector<uint8_t>& x, const std::array<uint8_
 }
 
 uint16_t invL(uint16_t val) {
-
+	uint16_t res = 0;
+	for(int j = 0; j < 4; ++j) {
+		for (int i = 0; i < 4; ++i) {
+			res |= ((val >> (i+j*4)) & 0x1) << (j + i*4);
+		}
+	}
+	return res;
 }
 
 uint16_t invS(uint16_t val) {
-
+	static const std::array<uint8_t,16> inverseS = [](){
+		std::array<uint8_t,16> res{0};
+		for (int i=0; i<16; ++i) {
+			res[S[i]] = i;
+		}
+		return res;
+	}();
+	uint16_t res = inverseS[(val)&0xf] |
+		(inverseS[(val>> 4)&0xf] <<  4) |
+		(inverseS[(val>> 8)&0xf] <<  8) |
+		(inverseS[(val>>12)&0xf] << 12);
+	return res;
 }
 
 // todo: precalc: only non-trivial differentials! is only (0,0) trivial?
-void performPrecalculation(const uint16_t k) {
-	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+auto performPrecalculation(const uint16_t k) {
 	// addSignalHandler();
 	// 65534
+	std::cout << "Precalculation using key " << std::hex << k << std::dec<< '\n';
 	const double incr = 1.0/kNumOfTexts;
 	for (uint16_t x1{0}; x1<kNumOfTexts; ++x1) {
-		for (uint16_t a{0}; a<=65534; ++a) {
-			uint16_t x2 = x1 + a;
+		for (int aExt{0}; aExt<=65535; ++aExt) {
+			uint16_t a = (uint16_t)aExt;
+			uint16_t x2 = x1 ^ a;
 			uint16_t tmp1 = heys_round(x1, k);
 			uint16_t tmp2 = heys_round(x2, k);
-			uint16_t b = tmp2 - tmp1;
+			uint16_t b = tmp2 ^ tmp1;
 
 			if (a==0 && b == 0) continue;
 
 			if(auto it = precalc.find(a); it !=precalc.end()) {
 				auto& listPerA = it->second;
-				if (auto it2 = listPerA.find(b); it2 != listPerA.end()) {
-					auto& prob = it2->second;
-					// prob += 1;
-					prob += incr;
-				} else {
-					listPerA.emplace(b, incr);
-				}
+				// if (auto it2 = listPerA.find(b); it2 != listPerA.end()) {
+				// 	auto& prob = it2->second;
+				// 	prob += incr;
+				// } else {
+				// 	listPerA.emplace(b, incr);
+				// }
+				listPerA[b] += incr;
 			} else {
 				precalc.emplace(a, DpList{{b, incr}});
 			}
@@ -263,33 +297,30 @@ void performPrecalculation(const uint16_t k) {
 
 	std::cout << "Removed (prob less then q*) diffs " << countRemoved << '\n';
 
-	findStats();
+	auto max = findStats();
 	// won't reach here if too many iterations
 	// saveToFile();
+	std::cout << __FUNCTION__ << ": " << timeNow() << "\n\n";
+	return max;
 }
 
 
 DpList branchAndBound(uint16_t a) {
 	DpList gCurr{{a, 1.0}};
 	DpList gNext;
-	std::cout << "Size of nexts " << precalc[a].size() << '\n';
-	for (int t=1; t<=2; ++t) {
+	// std::cout << "Size of nexts " << precalc[a].size() << '\n';
+	for (int t=1; t<=5; ++t) {
 		gNext.clear();
 		// branch
 		for (const auto& currState: gCurr) {
 			for (const auto& nextState: precalc[currState.first]) {
-				// auto& gama = precalc.first;
-
-				if (auto it = gNext.find(nextState.first); it!=gNext.end()) {
-					it->second += currState.second * nextState.second;
-				} else {
-					gNext.emplace(nextState.first, currState.second * nextState.second);
-				}
+				gNext[nextState.first] += currState.second * nextState.second;
 			}
 		}
 
-		findStatsList(a, gNext);
-		std::cout << "gNext size before bound step: " << gNext.size() <<'\n';
+		if (t == 5) findStatsList(a, gNext, t);
+
+		// std::cout << t << ": gNext size before bound step: " << gNext.size() <<'\n';
 
 		//bound
 		for (auto it=gNext.begin();it!=gNext.end();) {
@@ -299,16 +330,113 @@ DpList branchAndBound(uint16_t a) {
 				++it;
 			}
 		}
-		std::cout << "gNext size after bound step: " << gNext.size() <<'\n';
+		// std::cout << t << ": gNext size after bound step: " << gNext.size() <<"\n\n";
+		gCurr = std::move(gNext);
 	}
-	return gNext;
+	std::cout << __FUNCTION__ << ": " << timeNow() << "\n\n";
+	return gCurr;
 }
 
+// 1 text = 2 bytes
+auto ctGenMyHeys(int numOfTexts, uint16_t a, const std::array<uint8_t, 14>& k) {
+    std::vector<uint8_t> pt1(2 * numOfTexts, 0);
+    std::vector<uint8_t> pt2(2 * numOfTexts, 0);
+    for (int i{0}; i < numOfTexts; ++i) {
+        pt1[2*i] = i&0xff;
+        pt1[2*i+1] = (i>>8)&0xff;
+        uint16_t xXORa = (uint16_t)i^a;
+        pt2[2*i] = (xXORa)&0xff;
+        pt2[2*i+1] = ((xXORa)>>8)&0xff;
+    }
 
+    std::vector<uint8_t> ct1 = heys(pt1, k);
+    std::vector<uint8_t> ct2 = heys(pt2, k);
 
+    std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+    return std::make_tuple(std::move(ct1), std::move(ct2));
+}
+
+void ptWriteNotMyHeys(int numOfTexts, uint16_t a) {
+    std::vector<uint8_t> pt1(2 * numOfTexts, 0);
+    std::vector<uint8_t> pt2(2 * numOfTexts, 0);
+    for (int i{0}; i < numOfTexts; ++i) {
+        pt1[2*i] = i&0xff;
+        pt1[2*i+1] = (i>>8)&0xff;
+        uint16_t xXORa = (uint16_t)i^a;
+        pt2[2*i] = (xXORa)&0xff;
+        pt2[2*i+1] = ((xXORa)>>8)&0xff;
+    }
+
+    // they're gonna be heys.bin input PT
+    std::ofstream fileInputPt1{"largePt1.txt", std::ios::binary};
+	fileInputPt1.write((char*)pt1.data(), pt1.size());
+
+	std::ofstream fileInputPt2{"largePt2.txt", std::ios::binary};
+	fileInputPt2.write((char*)pt2.data(), pt2.size());
+
+    std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+}
+
+auto ctReadNotMyHeys(int numOfTexts) {
+    std::vector<uint8_t> ct1(2 * numOfTexts, 0);
+    std::vector<uint8_t> ct2(2 * numOfTexts, 0);
+    
+    // they're gonna be heys.bin output CT
+    std::ifstream fileOutputCt1{"largeCt1.txt", std::ios::binary};
+	fileOutputCt1.read((char*)ct1.data(), ct1.size());
+
+	std::ifstream fileOutputCt2{"largeCt2.txt", std::ios::binary};
+	fileOutputCt2.read((char*)ct2.data(), ct2.size());
+
+    std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+    return std::make_tuple(std::move(ct1), std::move(ct2));
+}
+
+// 1 text = 2 bytes
+void bruteK7(int numOfTexts, uint16_t a, uint16_t b, const std::vector<uint8_t>& ct1, const std::vector<uint8_t>& ct2) {
+    // auto [pt1, pt2, ct1, ct2] = genPtCt(len, a, numOfTexts);
+    // static const auto [ct1, ct2] = ctGenerator(numOfTexts);
+    std::unordered_map<uint16_t, int> perKeySuccessCount;
+    for (uint16_t i{0}; i < numOfTexts; ++i) {
+        for (int k7Ext{0}; k7Ext < 65536; ++k7Ext) {
+            uint16_t k7 = (uint16_t)k7Ext;
+            uint16_t x71 = ct1[2 * i] | ((uint16_t)ct1[2 * i + 1] << 8);
+            uint16_t x72 = ct2[2 * i] | ((uint16_t)ct2[2 * i + 1] << 8);
+            uint16_t x61 = x71 ^ k7;
+            uint16_t x62 = x72 ^ k7;
+            uint16_t x51XORk6 = invS(invL(x61));
+            uint16_t x52XORk6 = invS(invL(x62));
+            uint16_t potentialB = x51XORk6 ^ x52XORk6;
+            if (potentialB == b) {
+                // std::cout << "Success on key "<< std::hex << k7 << '\n';
+                perKeySuccessCount[k7] += 1;
+            }
+        }
+    }
+
+    std::multimap<int, uint16_t> max{};
+    for (const auto [k, freq] : perKeySuccessCount) {
+        // if (freq > 1){ std::cout << "found freq " << freq << " for key " << std::hex << k << '\n'; }
+        if (max.size() > 0 && freq > max.begin()->first) {
+            if (max.size() >= kMaxKeyCandidatesPerDiff) {
+                max.erase(max.begin());
+            }
+            max.emplace(freq, k);
+        } else if (max.size() == 0) {
+            max.emplace(freq, k);
+        }
+    }
+
+    std::cout << "Most probable key for (" << a << ',' << b << ") in (key, frequency) format = ";
+    for (const auto [freq, k] : max) {
+        std::cout << "(" << std::hex << k << std::dec<< "," << freq << "), ";
+    }
+    std::cout << '\n';
+    std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
+}
 
 int main(int argc, char* argv[]) {
-	
+	std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 
 	// std::ifstream filePt{argv[1], std::ios::binary | std::ios::ate};
 	// int filePtSize = filePt.tellg();
@@ -316,7 +444,7 @@ int main(int argc, char* argv[]) {
 	// filePt.seekg(0, filePt.beg);
 	// filePt.read((char*)pt.data(), filePtSize);
 
-	// std::ifstream fileKey{argv[3], std::ios::binary | std::ios::ate};
+	// std::ifstream fileKey{"k.txt", std::ios::binary | std::ios::ate};
 	// int fileKeySize = fileKey.tellg();
 	// if (fileKeySize > 14) {
 	// 	std::cout << "Key should be 14 byte long(if shorter, then padded with 0s)";
@@ -342,10 +470,90 @@ int main(int argc, char* argv[]) {
 	// 2000
 	//min 0.0005, max [(61568,24616)=0.072000, (65280,64)=0.104000, (65360,65024)=0.112000, (65504,57344)=0.120000, (65534,61440)=0.125000, (65520,32)=0.128000, 
 	// (62208,31752)=0.232000, (64256,33800)=0.256000, (61440,32776)=1.000000, ], avg 0.00068583
-	performPrecalculation(0x0000);
-	// taking As with most probable difs in precalc
-	branchAndBound(61440);
+	// auto maxAB = performPrecalculation(0xabcd);
+	// // // taking As with most probable difs in precalc
+	// std::set<uint16_t> aUsed;
+	// for (auto it=maxAB.rbegin();it!=maxAB.rend();++it) {
+	// 	if (aUsed.find(it->second.first) != aUsed.end()) {continue;}
+	// 	std::cout << "Performing branch and bound on a=" << it->second.first << '\n';
+	// 	branchAndBound(it->second.first);
+	// 	aUsed.insert(it->second.first);
+	// }
 
-	// readFromFile();
+	// // // // using precalc for key = 0x0000
+    // auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
+    // 	// {40960,1092}, {40960,52428}, {40960,4}, {40960,8736}, {40960,34952}, {40960,17472},
+    // 	{53248,34952}, {53248,17472}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,8736}, {53248,16384}, {53248,17476}, {53248,52428},
+    // 	// {53248,8736},
+    // };
+    // // const auto [ct1, ct2] = 
+    // std::vector<uint8_t> ct1, ct2;
+    // uint16_t currA = 0;
+    // // std::array<uint8_t, 14> testKey{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x11, 0x11};
+    // // std::array<uint8_t, 14> testKey{0x15, 0x57, 0x57, 0x67, 0x57, 0x11, 0x57, 0x05, 0x54, 0x1, 0x2, 0x3, 0x81, 0x54};
+    // std::array<uint8_t, 14> testKey{0x15, 1, 5, 3, 4, 100, 67, 6, 3, 7, 0x2, 0x3, 0x0f, 0x0f};
+    // for (const auto [a, b] : mostProbable5RoundDiffs) {
+    // 	if (currA != a) {
+    //         std::tie(ct1, ct2) = ctGenMyHeys(kNumOfTextsForBrute, a, testKey);
+    //         currA = a;
+    // 	}
+    //     // bruteK7(kNumOfTextsForBrute, b, std::bind(ctGenMyHeys, std::placeholders::_1, a, std::array<uint8_t,
+    //     // 14>{0,0,0,0,0,0,0,0,0,0,0,0,0x11, 0x11}));
+    //     bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
+    // }
+    
+	// // -------------------------- FAIL
+ //    // ptWriteNotMyHeys(kNumOfTextsForBrute, 53248);
+
+	// can use only the same a for all diff
+    auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
+    	{53248,34952}, {53248,17472}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,8736}, {53248,16384}, {53248,17476}, {53248,52428},
+    };
+    std::vector<uint8_t> ct1, ct2;
+    uint16_t currA = 0;
+    for (const auto [a, b] : mostProbable5RoundDiffs) {
+    	if (currA != a) {
+            std::tie(ct1, ct2) = ctReadNotMyHeys(kNumOfTextsForBrute);
+            currA = a;
+    	}
+        bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
+    }
+
+    // ptWriteNotMyHeys(kNumOfTextsForBrute, 20480);
+
+	// // -------------------------- FAIL
+	// // can use only the same a for all diff
+ //    auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
+ //    	{20480,34824}, {20480,32776}, {20480,4369}, {20480,8738}, {20480,4097}, {20480,4353}, {20480,257}, {20480,17}, {20480,514}, {20480,8706}
+ //    };
+ //    std::vector<uint8_t> ct1, ct2;
+ //    uint16_t currA = 0;
+ //    for (const auto [a, b] : mostProbable5RoundDiffs) {
+ //    	if (currA != a) {
+ //            std::tie(ct1, ct2) = ctReadNotMyHeys(kNumOfTextsForBrute);
+ //            currA = a;
+ //    	}
+ //        bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
+ //    }
+
+    // ptWriteNotMyHeys(kNumOfTextsForBrute, 53248);
+
+	// // can use only the same a for all diff
+ //    auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
+ //    	{53248,16384}
+ //    };
+ //    std::vector<uint8_t> ct1, ct2;
+ //    uint16_t currA = 0;
+ //    for (const auto [a, b] : mostProbable5RoundDiffs) {
+ //    	if (currA != a) {
+ //            std::tie(ct1, ct2) = ctReadNotMyHeys(kNumOfTextsForBrute);
+ //            currA = a;
+ //    	}
+ //        bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
+ //    }
+
+
+
+        // readFromFile();
 	// findStats();
 }
