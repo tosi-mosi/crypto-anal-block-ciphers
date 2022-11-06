@@ -9,15 +9,9 @@
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-#include <signal.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-
 const int kNumOfMaxs = 10;
 
-const int kNumOfTexts = 10000;
-const char* fname = "serialization.txt";
+const int kNumOfTexts = 20000;
 // don't need it
 const double kQStar = 0.0001;
 // works fast anyway
@@ -92,7 +86,7 @@ void findStatsList(uint16_t a, const DpList& l, int round) {
 	double sum = 0;
 	for (const auto [b, prob]: l) {
 		if(max.size()>0 && prob > max.begin()->first) {
-			if (max.size() >= kNumOfMaxs) {
+			if (max.size() >= kNumOfMaxs && max.begin()->second!=b) {
 				// *max.begin() = prob;
 				max.erase(max.begin());
 			} 
@@ -311,6 +305,10 @@ void ptWriteNotMyHeys(int numOfTexts, uint16_t a) {
 	std::ofstream fileInputPt2{"largePt2.txt", std::ios::binary};
 	fileInputPt2.write((char*)pt2.data(), pt2.size());
 
+	std::cout << "creating ciphers " << timeNow() << '\n';
+	system("./heys.bin e 11 largePt1.txt largeCt1.txt");
+	system("./heys.bin e 11 largePt2.txt largeCt2.txt");
+
     std::cout << __FUNCTION__ << ": " << timeNow() << '\n';
 }
 
@@ -351,7 +349,7 @@ void bruteK7(int numOfTexts, uint16_t a, uint16_t b, const std::vector<uint8_t>&
     std::multimap<int, uint16_t> max{};
     for (const auto [k, freq] : perKeySuccessCount) {
         if (max.size() > 0 && freq > max.begin()->first) {
-            if (max.size() >= kMaxKeyCandidatesPerDiff) {
+            if (max.size() >= kMaxKeyCandidatesPerDiff && k!=max.begin()->second) {
                 max.erase(max.begin());
             }
             max.emplace(freq, k);
@@ -360,7 +358,7 @@ void bruteK7(int numOfTexts, uint16_t a, uint16_t b, const std::vector<uint8_t>&
         }
     }
 
-    std::cout << "Most probable key for (" << a << ',' << b << ") in (key, frequency) format = ";
+    std::cout << "Most probable keys for (" << a << ',' << b << ") in (key, frequency) format = ";
     for (const auto [freq, k] : max) {
         std::cout << "(" << std::hex << k << std::dec<< "," << freq << "), ";
     }
@@ -386,15 +384,14 @@ int main(int argc, char* argv[]) {
 	// --------------------------------------- TRYING TO BRUTEFORCE KEY SUPPLIED BY ME --------------------------------------
 
     // auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
-    // 	// {40960,1092}, {40960,52428}, {40960,4}, {40960,8736}, {40960,34952}, {40960,17472},
-    // 	{53248,34952}, {53248,17472}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,8736}, {53248,16384}, {53248,17476}, {53248,52428},
-    // 	// {53248,8736},
+    // 	// {53248,34952}, {53248,17472}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,8736}, {53248,16384}, {53248,17476}, {53248,52428},
+    // 	{24576,4368}, {24576,34944}, {24576,8736}, {24576,34952}, {24576,2056}, {24576,4353}, {24576,2048}, {24576,4369}, {24576,8738}, {24576,273},
     // };
     // std::vector<uint8_t> ct1, ct2;
     // uint16_t currA = 0;
     // // std::array<uint8_t, 14> testKey{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x11, 0x11};
     // // std::array<uint8_t, 14> testKey{0x15, 0x57, 0x57, 0x67, 0x57, 0x11, 0x57, 0x05, 0x54, 0x1, 0x2, 0x3, 0x81, 0x54};
-    // std::array<uint8_t, 14> testKey{0x15, 1, 5, 3, 4, 100, 67, 6, 3, 7, 0x2, 0x3, 0x0f, 0x0f};
+    // std::array<uint8_t, 14> testKey{0x15, 1, 5, 3, 4, 100, 67, 6, 3, 7, 0x2, 0x3, 0x1f, 0x2f};
     // for (const auto [a, b] : mostProbable5RoundDiffs) {
     // 	if (currA != a) {
     //         std::tie(ct1, ct2) = ctGenMyHeys(kNumOfTextsForBrute, a, testKey);
@@ -403,15 +400,16 @@ int main(int argc, char* argv[]) {
     //     bruteK7(kNumOfTextsForBrute, a, b, ct1, ct2);
     // }
 
- //    // --------------------------------------- TRYING TO BRUTEFORCE KEY EMBEDDED IN HEYS.BIN -> FAILS UNFORTENETLY -----------------------------
+ //    // --------------------------------------- TRYING TO BRUTEFORCE KEY EMBEDDED IN HEYS.BIN -----------------------------
     
-    ptWriteNotMyHeys(kNumOfTextsForBrute, 53248);
-    // // ptWriteNotMyHeys(kNumOfTextsForBrute, 20480);
+    ptWriteNotMyHeys(kNumOfTextsForBrute, 24576);
+ //    // // ptWriteNotMyHeys(kNumOfTextsForBrute, 20480);
 
 	// can use only the same a for all diff when bruteforcing embedded key
     auto mostProbable5RoundDiffs = std::vector<std::pair<uint16_t, uint16_t>>{
-    	{53248,8736}, {53248,17476}, {53248,17472}, {53248,34952}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,16384}, {53248,52428},
+    	// {53248,8736}, {53248,17476}, {53248,17472}, {53248,34952}, {53248,4}, {53248,2056}, {53248,1092}, {53248,64}, {53248,16384}, {53248,52428},
     	// {20480,34824}, {20480,32776}, {20480,4369}, {20480,8738}, {20480,4097}, {20480,4353}, {20480,257}, {20480,17}, {20480,514}, {20480,8706}
+    	{24576,4368}, {24576,34944}, {24576,8736}, {24576,34952}, {24576,2056}, {24576,4353}, {24576,2048}, {24576,4369}, {24576,8738}, {24576,273},
     };
     std::vector<uint8_t> ct1, ct2;
     uint16_t currA = 0;
